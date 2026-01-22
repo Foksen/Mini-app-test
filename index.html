@@ -15,6 +15,7 @@
       visibility: hidden;
     }
     body.ready { visibility: visible; }
+    body.loading #app { display: none; }
 
     h1 { margin: 0 0 12px; font-size: 18px; }
 
@@ -57,12 +58,39 @@
       white-space: pre-wrap;
       word-break: break-word;
     }
+
+    .loader-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,.02);
+      z-index: 9999;
+    }
+    body.loading .loader-overlay { display: flex; }
+
+    .spinner {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      border: 2px solid rgba(127,127,127,.22);
+      border-top-color: var(--spinner-accent, #2481cc);
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
   <script>
     (function () {
+      function truthy(v) {
+        if (v === null || v === undefined) return false;
+        const s = String(v).trim().toLowerCase();
+        return (s === "1" || s === "true" || s === "yes" || s === "on");
+      }
+
       function getUrlCustomParams() {
         const q = new URLSearchParams(location.search);
         const obj = {};
@@ -82,6 +110,10 @@
         for (const part of parts) {
           const p = part.trim();
           if (!p) continue;
+
+          const low = p.toLowerCase();
+          if (low === "notify") { params.notify = "1"; continue; }
+
           const dash = p.indexOf("-");
           if (dash <= 0) continue;
           const key = p.slice(0, dash).trim();
@@ -111,15 +143,22 @@
       const urlParams = getUrlCustomParams();
       const params = mergeParams(startParams, urlParams);
 
+      const notify = truthy(params.notify);
+
       let redirectTo = null;
       if (params.channel != null) {
         const ch = normalizeChannelName(params.channel);
         if (ch) redirectTo = `https://t.me/${ch}`;
       }
 
-      window.__BOOT__ = { params, redirectTo };
+      const accent =
+        tg?.themeParams?.button_color ||
+        tg?.themeParams?.link_color ||
+        "#2481cc";
 
-      if (redirectTo) {
+      window.__BOOT__ = { params, redirectTo, notify, spinnerAccent: accent };
+
+      if (redirectTo && !notify) {
         try { tg?.ready?.(); } catch {}
         if (tg?.openTelegramLink) {
           tg.openTelegramLink(redirectTo);
@@ -133,32 +172,36 @@
 </head>
 
 <body>
-  <h1>Telegram Mini App — Debug</h1>
+  <div class="loader-overlay"><div class="spinner"></div></div>
 
-  <div class="card">
-    <div class="params-title">Параметры ссылки:</div>
-    <div id="paramsText"></div>
-  </div>
+  <div id="app">
+    <h1>Telegram Mini App — Debug</h1>
 
-  <div class="card">
-    <details>
-      <summary>1) InitData (unsafe)</summary>
-      <div class="content"><pre id="unsafeDump"></pre></div>
-    </details>
-  </div>
+    <div class="card">
+      <div class="params-title">Параметры ссылки:</div>
+      <div id="paramsText"></div>
+    </div>
 
-  <div class="card">
-    <details>
-      <summary>2) InitData (raw)</summary>
-      <div class="content"><pre id="initDataDump"></pre></div>
-    </details>
-  </div>
+    <div class="card">
+      <details>
+        <summary>1) InitData (unsafe)</summary>
+        <div class="content"><pre id="unsafeDump"></pre></div>
+      </details>
+    </div>
 
-  <div class="card">
-    <details>
-      <summary>3) Telegram WebApp</summary>
-      <div class="content"><pre id="baseDump"></pre></div>
-    </details>
+    <div class="card">
+      <details>
+        <summary>2) InitData (raw)</summary>
+        <div class="content"><pre id="initDataDump"></pre></div>
+      </details>
+    </div>
+
+    <div class="card">
+      <details>
+        <summary>3) Telegram WebApp</summary>
+        <div class="content"><pre id="baseDump"></pre></div>
+      </details>
+    </div>
   </div>
 
   <script>
@@ -169,7 +212,7 @@
 
     function renderParamsText(params) {
       const el = document.getElementById("paramsText");
-      const keys = Object.keys(params || {});
+      const keys = Object.keys(params || {}).filter(k => k !== "notify");
       if (keys.length === 0) {
         el.textContent = "(нет)";
         return;
@@ -194,12 +237,30 @@
       });
     }
 
-    function dump() {
-      const boot = window.__BOOT__ || { params: {}, redirectTo: null };
-      if (boot.redirectTo) return;
+    function dumpAndMaybeRedirect() {
+      const boot = window.__BOOT__ || { params: {}, redirectTo: null, notify: false, spinnerAccent: "#2481cc" };
+      document.documentElement.style.setProperty("--spinner-accent", boot.spinnerAccent);
 
       const tg = window.Telegram?.WebApp ?? null;
       try { tg?.ready?.(); } catch {}
+
+      if (boot.redirectTo && boot.notify) {
+        document.body.classList.add("ready");
+        document.body.classList.add("loading");
+
+        setTimeout(() => {
+          if (tg?.openTelegramLink) {
+            tg.openTelegramLink(boot.redirectTo);
+            setTimeout(() => tg.close?.(), 200);
+          } else {
+            location.replace(boot.redirectTo);
+          }
+        }, 1000);
+
+        return;
+      }
+
+      if (boot.redirectTo) return;
 
       renderParamsText(boot.params);
 
@@ -229,9 +290,9 @@
     }
 
     if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", dump, { once: true });
+      document.addEventListener("DOMContentLoaded", dumpAndMaybeRedirect, { once: true });
     } else {
-      dump();
+      dumpAndMaybeRedirect();
     }
   </script>
 </body>
