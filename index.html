@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Telegram Mini App Debug</title>
+
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    body {
+      margin: 0;
+      padding: 16px;
+      background: var(--tg-theme-bg-color, #fff);
+      color: var(--tg-theme-text-color, #111);
+    }
+    h1 { font-size: 18px; margin: 0 0 12px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+    button {
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(127,127,127,.35);
+      background: var(--tg-theme-secondary-bg-color, #f3f3f3);
+      color: var(--tg-theme-text-color, #111);
+      cursor: pointer;
+    }
+    button:active { transform: translateY(1px); }
+    .card {
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(127,127,127,.25);
+      background: rgba(127,127,127,.08);
+      margin-bottom: 12px;
+    }
+    .k {
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    pre {
+      margin: 0;
+      overflow: auto;
+      padding: 10px;
+      border-radius: 10px;
+      background: rgba(0,0,0,.12);
+      color: inherit;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .hint { opacity: .8; font-size: 13px; }
+  </style>
+</head>
+
+<body>
+  <h1>Telegram Mini App — Debug Page</h1>
+  <div class="hint">
+    Эта страница показывает данные, доступные из Telegram WebApp API + URL параметры.
+  </div>
+
+  <div class="row">
+    <button id="btnRefresh">Обновить вывод</button>
+    <button id="btnExpand">Expand</button>
+    <button id="btnMainBtn">Toggle MainButton</button>
+    <button id="btnBackBtn">Toggle BackButton</button>
+    <button id="btnSendData">sendData("hello")</button>
+    <button id="btnClose">Close</button>
+  </div>
+
+  <div class="card">
+    <div class="k">1) URL при открытии (параметры ссылки)</div>
+    <pre id="urlDump"></pre>
+  </div>
+
+  <div class="card">
+    <div class="k">2) Telegram.WebApp — базовые поля</div>
+    <pre id="baseDump"></pre>
+  </div>
+
+  <div class="card">
+    <div class="k">3) initData (сырой) — то, что обычно проверяют на backend</div>
+    <pre id="initDataDump"></pre>
+  </div>
+
+  <div class="card">
+    <div class="k">4) initDataUnsafe (распарсенные данные, НЕ доверять без проверки подписи)</div>
+    <pre id="unsafeDump"></pre>
+  </div>
+
+  <div class="card">
+    <div class="k">5) Theme params</div>
+    <pre id="themeDump"></pre>
+  </div>
+
+  <div class="card">
+    <div class="k">6) Viewport</div>
+    <pre id="viewportDump"></pre>
+  </div>
+
+  <div class="card">
+    <div class="k">7) Последние события</div>
+    <pre id="eventsDump"></pre>
+  </div>
+
+  <script>
+    const events = [];
+    const logEvent = (name, payload) => {
+      const item = {
+        at: new Date().toISOString(),
+        name,
+        payload
+      };
+      events.unshift(item);
+      if (events.length > 30) events.length = 30;
+      document.getElementById('eventsDump').textContent = JSON.stringify(events, null, 2);
+    };
+
+    function safeJson(obj) {
+      try { return JSON.stringify(obj, null, 2); }
+      catch (e) { return String(obj); }
+    }
+
+    function dumpAll() {
+      // URL dump
+      const urlInfo = {
+        href: location.href,
+        origin: location.origin,
+        pathname: location.pathname,
+        search: location.search,
+        hash: location.hash,
+        // удобный разбор query параметров:
+        query: Object.fromEntries(new URLSearchParams(location.search).entries()),
+      };
+      document.getElementById('urlDump').textContent = safeJson(urlInfo);
+
+      // Telegram dump
+      const tg = window.Telegram?.WebApp;
+
+      if (!tg) {
+        document.getElementById('baseDump').textContent =
+          'Telegram.WebApp недоступен. Открой страницу внутри Telegram Mini App.';
+        document.getElementById('initDataDump').textContent = '';
+        document.getElementById('unsafeDump').textContent = '';
+        document.getElementById('themeDump').textContent = '';
+        document.getElementById('viewportDump').textContent = '';
+        return;
+      }
+
+      const base = {
+        version: tg.version,
+        platform: tg.platform,
+        colorScheme: tg.colorScheme,
+        isExpanded: tg.isExpanded,
+
+        // важное:
+        initDataPresent: Boolean(tg.initData),
+        initDataLength: tg.initData?.length ?? 0,
+
+        // иногда полезно:
+        headerColor: tg.headerColor,
+        backgroundColor: tg.backgroundColor,
+
+        // если доступно в твоей версии:
+        // (в разных версиях API набор может отличаться)
+      };
+      document.getElementById('baseDump').textContent = safeJson(base);
+
+      // initData (raw signed string)
+      document.getElementById('initDataDump').textContent = tg.initData || '(empty)';
+
+      // initDataUnsafe (parsed)
+      document.getElementById('unsafeDump').textContent = safeJson(tg.initDataUnsafe);
+
+      // theme params
+      document.getElementById('themeDump').textContent = safeJson(tg.themeParams);
+
+      // viewport
+      const viewport = {
+        viewportHeight: tg.viewportHeight,
+        viewportStableHeight: tg.viewportStableHeight,
+      };
+      document.getElementById('viewportDump').textContent = safeJson(viewport);
+    }
+
+    // Init
+    (function init() {
+      const tg = window.Telegram?.WebApp;
+
+      if (tg) {
+        // Сообщаем Telegram, что приложение готово
+        tg.ready();
+
+        // Для красоты: можно попросить расшириться
+        // tg.expand();
+
+        logEvent('init', {
+          version: tg.version,
+          platform: tg.platform
+        });
+
+        // События
+        tg.onEvent('themeChanged', () => {
+          logEvent('themeChanged', tg.themeParams);
+          dumpAll();
+        });
+
+        tg.onEvent('viewportChanged', (e) => {
+          // e обычно содержит isStateStable
+          logEvent('viewportChanged', {
+            event: e,
+            viewportHeight: tg.viewportHeight,
+            viewportStableHeight: tg.viewportStableHeight
+          });
+          dumpAll();
+        });
+
+        tg.onEvent('mainButtonClicked', () => {
+          logEvent('mainButtonClicked', null);
+        });
+
+        tg.onEvent('backButtonClicked', () => {
+          logEvent('backButtonClicked', null);
+        });
+      }
+
+      dumpAll();
+    })();
+
+    // Buttons
+    document.getElementById('btnRefresh').onclick = () => dumpAll();
+
+    document.getElementById('btnExpand').onclick = () => {
+      const tg = window.Telegram?.WebApp;
+      tg?.expand();
+      logEvent('expand()', null);
+      dumpAll();
+    };
+
+    let mainShown = false;
+    document.getElementById('btnMainBtn').onclick = () => {
+      const tg = window.Telegram?.WebApp;
+      if (!tg?.MainButton) return;
+
+      mainShown = !mainShown;
+      tg.MainButton.setText(mainShown ? 'MainButton (click me)' : 'MainButton');
+      if (mainShown) tg.MainButton.show();
+      else tg.MainButton.hide();
+
+      logEvent('toggle MainButton', { shown: mainShown });
+    };
+
+    let backShown = false;
+    document.getElementById('btnBackBtn').onclick = () => {
+      const tg = window.Telegram?.WebApp;
+      if (!tg?.BackButton) return;
+
+      backShown = !backShown;
+      if (backShown) tg.BackButton.show();
+      else tg.BackButton.hide();
+
+      logEvent('toggle BackButton', { shown: backShown });
+    };
+
+    document.getElementById('btnSendData').onclick = () => {
+      const tg = window.Telegram?.WebApp;
+      if (!tg) return;
+
+      tg.sendData(JSON.stringify({ hello: true, at: Date.now() }));
+      logEvent('sendData()', { sent: true });
+    };
+
+    document.getElementById('btnClose').onclick = () => {
+      const tg = window.Telegram?.WebApp;
+      tg?.close();
+      logEvent('close()', null);
+    };
+  </script>
+</body>
+</html>
