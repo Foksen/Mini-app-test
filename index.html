@@ -3,9 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TG Mini App — Debug (kv payload)</title>
-
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <title>TG Mini App — Debug</title>
 
   <style>
     :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
@@ -14,9 +12,11 @@
       padding: 16px;
       background: var(--tg-theme-bg-color, #fff);
       color: var(--tg-theme-text-color, #111);
+      visibility: hidden;
     }
+    body.ready { visibility: visible; }
+
     h1 { margin: 0 0 12px; font-size: 18px; }
-    .hint { opacity: .8; font-size: 13px; margin-bottom: 12px; line-height: 1.35; }
 
     .card {
       padding: 12px;
@@ -25,6 +25,10 @@
       background: rgba(127,127,127,.08);
       margin-bottom: 12px;
     }
+
+    .params-title { font-weight: 700; margin-bottom: 10px; }
+    .param { margin: 8px 0; }
+    .param strong { font-weight: 750; }
 
     summary {
       cursor: pointer;
@@ -53,66 +57,107 @@
       white-space: pre-wrap;
       word-break: break-word;
     }
-
-    code.inline {
-      padding: 1px 6px;
-      border-radius: 8px;
-      background: rgba(0,0,0,.10);
-    }
   </style>
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <script>
+    (function () {
+      function getUrlCustomParams() {
+        const q = new URLSearchParams(location.search);
+        const obj = {};
+        for (const [k, v] of q.entries()) {
+          if (/^tgwebapp/i.test(k)) continue;
+          obj[k] = v;
+        }
+        return obj;
+      }
+
+      function parseStartParam(startParam) {
+        if (!startParam) return {};
+        const raw = String(startParam).trim();
+        if (!raw) return {};
+        const parts = raw.split("__").filter(Boolean);
+        const params = {};
+        for (const part of parts) {
+          const p = part.trim();
+          if (!p) continue;
+          const dash = p.indexOf("-");
+          if (dash <= 0) continue;
+          const key = p.slice(0, dash).trim();
+          let value = p.slice(dash + 1).trim();
+          value = value.replace(/--/g, "-");
+          if (key) params[key] = value;
+        }
+        return params;
+      }
+
+      function mergeParams(startParams, urlParams) {
+        return { ...startParams, ...urlParams };
+      }
+
+      function normalizeChannelName(raw) {
+        if (!raw) return null;
+        let s = String(raw).trim();
+        if (s.startsWith("@")) s = s.slice(1);
+        if (!/^[A-Za-z0-9_]{5,32}$/.test(s)) return null;
+        return s;
+      }
+
+      const tg = window.Telegram?.WebApp ?? null;
+
+      const startParam = tg?.initDataUnsafe?.start_param ?? null;
+      const startParams = parseStartParam(startParam);
+      const urlParams = getUrlCustomParams();
+      const params = mergeParams(startParams, urlParams);
+
+      let redirectTo = null;
+      if (params.channel != null) {
+        const ch = normalizeChannelName(params.channel);
+        if (ch) redirectTo = `https://t.me/${ch}`;
+      }
+
+      window.__BOOT__ = { params, redirectTo };
+
+      if (redirectTo) {
+        try { tg?.ready?.(); } catch {}
+        if (tg?.openTelegramLink) {
+          tg.openTelegramLink(redirectTo);
+          setTimeout(() => tg.close?.(), 250);
+        } else {
+          location.replace(redirectTo);
+        }
+      }
+    })();
+  </script>
 </head>
 
 <body>
   <h1>Telegram Mini App — Debug</h1>
-  <div class="hint">
-    Формат параметров в <code class="inline">startapp</code>:<br/>
-    <code class="inline">key-value__key-value__key-value</code><br/>
-    (только символы: буквы/цифры/подчёркивание/дефис). Если в значении нужен дефис <code class="inline">-</code>,
-    пиши его как <code class="inline">--</code> (мы разэкранируем обратно).
-    <br/><br/>
-    Логика: если итоговые параметры дают <code class="inline">redirect=true</code> и валидный <code class="inline">channel</code> →
-    редирект на <code class="inline">https://t.me/&lt;channel&gt;</code>, иначе просто показываем инфу.
+
+  <div class="card">
+    <div class="params-title">Параметры ссылки:</div>
+    <div id="paramsText"></div>
   </div>
 
   <div class="card">
-    <details open>
-      <summary>0) Parsed params (URL + startapp)</summary>
-      <div class="content"><pre id="paramsDump">...</pre></div>
-    </details>
-  </div>
-
-  <div class="card">
-    <details open>
-      <summary>0.1) Test links (подставь bot/app)</summary>
-      <div class="content"><pre id="testLinksDump">...</pre></div>
-    </details>
-  </div>
-
-  <div class="card">
-    <details open>
-      <summary>1) URL при открытии</summary>
-      <div class="content"><pre id="urlDump"></pre></div>
-    </details>
-  </div>
-
-  <div class="card">
-    <details open>
-      <summary>2) Telegram.WebApp — базовые поля</summary>
-      <div class="content"><pre id="baseDump"></pre></div>
+    <details>
+      <summary>1) InitData (unsafe)</summary>
+      <div class="content"><pre id="unsafeDump"></pre></div>
     </details>
   </div>
 
   <div class="card">
     <details>
-      <summary>3) initData (сырой, подписанный)</summary>
+      <summary>2) InitData (raw)</summary>
       <div class="content"><pre id="initDataDump"></pre></div>
     </details>
   </div>
 
   <div class="card">
     <details>
-      <summary>4) initDataUnsafe (распарсенный объект)</summary>
-      <div class="content"><pre id="unsafeDump"></pre></div>
+      <summary>3) Telegram WebApp</summary>
+      <div class="content"><pre id="baseDump"></pre></div>
     </details>
   </div>
 
@@ -122,128 +167,53 @@
       catch { return String(obj); }
     }
 
-    function truthy(v) {
-      if (v === null || v === undefined) return false;
-      const s = String(v).trim().toLowerCase();
-      return (s === "1" || s === "true" || s === "yes" || s === "on");
-    }
-
-    function normalizeChannelName(raw) {
-      if (!raw) return null;
-      let s = String(raw).trim();
-      if (s.startsWith("@")) s = s.slice(1);
-      // username канала/юзера: 5-32, буквы/цифры/_
-      if (!/^[A-Za-z0-9_]{5,32}$/.test(s)) return null;
-      return s;
-    }
-
-    function getUrlParamsObj() {
-      return Object.fromEntries(new URLSearchParams(location.search).entries());
-    }
-
-    // Формат start_param: key-value__key-value
-    // Где "--" внутри value означает один "-"
-    function parseStartParam(startParam) {
-      if (!startParam) return { format: null, raw: null, params: {} };
-
-      const raw = String(startParam).trim();
-      const parts = raw.split("__").filter(Boolean);
-
-      const params = {};
-      for (const part of parts) {
-        const dash = part.indexOf("-");
-        if (dash <= 0) continue;
-
-        const key = part.slice(0, dash).trim();
-        let value = part.slice(dash + 1).trim();
-
-        // unescape: "--" -> "-"
-        value = value.replace(/--/g, "-");
-
-        if (key) params[key] = value;
-      }
-
-      return { format: "kv__kv", raw, params };
-    }
-
-    function mergeParams(startappParams, urlParams) {
-      // URL имеет приоритет над startapp
-      return { ...startappParams, ...urlParams };
-    }
-
-    function doRedirectIfNeeded(tg, finalParams) {
-      const redirect = truthy(finalParams.redirect);
-      const channel = normalizeChannelName(finalParams.channel);
-
-      if (!redirect) return { didRedirect: false, reason: "redirect is false/missing" };
-      if (!channel) return { didRedirect: false, reason: "redirect=true but channel missing/invalid" };
-
-      const link = `https://t.me/${channel}`;
-      if (tg?.openTelegramLink) tg.openTelegramLink(link);
-      else location.href = link;
-
-      return { didRedirect: true, link };
-    }
-
-    function dumpAll() {
-      const tg = window.Telegram?.WebApp ?? null;
-      if (tg) tg.ready();
-
-      // URL info
-      const urlInfo = {
-        href: location.href,
-        origin: location.origin,
-        pathname: location.pathname,
-        search: location.search,
-        hash: location.hash,
-        query: getUrlParamsObj(),
-      };
-      document.getElementById("urlDump").textContent = safeJson(urlInfo);
-
-      // parse start_param
-      const startParam = tg?.initDataUnsafe?.start_param ?? null;
-      const spParsed = parseStartParam(startParam);
-
-      const urlParams = getUrlParamsObj();
-      const finalParams = mergeParams(spParsed.params || {}, urlParams);
-
-      const redirectResult = doRedirectIfNeeded(tg, finalParams);
-
-      document.getElementById("paramsDump").textContent = safeJson({
-        start_param: startParam,
-        start_param_parsed: spParsed,
-        url_params: urlParams,
-        final_params: finalParams,
-        redirect_check: redirectResult
-      });
-
-      // test links (templates)
-      document.getElementById("testLinksDump").textContent = [
-        "Примеры для Telegram (deeplink):",
-        "1) redirect=1, channel=yandex:",
-        "https://t.me/<botname>/<appname>?startapp=redirect-1__channel-yandex",
-        "",
-        "2) redirect=0 + доп.поля:",
-        "https://t.me/<botname>/<appname>?startapp=redirect-0__channel-yandex__utm-test__x-123",
-        "",
-        "3) значение с дефисом (utm=test-a):",
-        "https://t.me/<botname>/<appname>?startapp=redirect-0__channel-yandex__utm-test--a",
-        "",
-        "Примеры для прямого открытия страницы (обычный URL):",
-        "https://<your-domain>/index.html?redirect=1&channel=yandex&utm=test&x=123"
-      ].join("\n");
-
-      // Если редиректнули — дальше вывод не нужен
-      if (redirectResult.didRedirect) return;
-
-      // Telegram dumps
-      if (!tg) {
-        document.getElementById("baseDump").textContent =
-          "Telegram.WebApp недоступен. Открой страницу внутри Telegram Mini App.";
-        document.getElementById("initDataDump").textContent = "";
-        document.getElementById("unsafeDump").textContent = "";
+    function renderParamsText(params) {
+      const el = document.getElementById("paramsText");
+      const keys = Object.keys(params || {});
+      if (keys.length === 0) {
+        el.textContent = "(нет)";
         return;
       }
+      el.innerHTML = "";
+      keys.sort().forEach((k) => {
+        const row = document.createElement("div");
+        row.className = "param";
+
+        const keyEl = document.createElement("strong");
+        keyEl.textContent = k;
+
+        const sep = document.createTextNode(": ");
+
+        const valEl = document.createElement("span");
+        valEl.textContent = String(params[k]);
+
+        row.appendChild(keyEl);
+        row.appendChild(sep);
+        row.appendChild(valEl);
+        el.appendChild(row);
+      });
+    }
+
+    function dump() {
+      const boot = window.__BOOT__ || { params: {}, redirectTo: null };
+      if (boot.redirectTo) return;
+
+      const tg = window.Telegram?.WebApp ?? null;
+      try { tg?.ready?.(); } catch {}
+
+      renderParamsText(boot.params);
+
+      if (!tg) {
+        document.getElementById("unsafeDump").textContent = "";
+        document.getElementById("initDataDump").textContent = "";
+        document.getElementById("baseDump").textContent =
+          "Telegram.WebApp недоступен (открой страницу внутри Telegram Mini App).";
+        document.body.classList.add("ready");
+        return;
+      }
+
+      document.getElementById("unsafeDump").textContent = safeJson(tg.initDataUnsafe);
+      document.getElementById("initDataDump").textContent = tg.initData || "(empty)";
 
       const base = {
         version: tg.version,
@@ -251,15 +221,18 @@
         colorScheme: tg.colorScheme,
         isExpanded: tg.isExpanded,
         initDataPresent: Boolean(tg.initData),
-        initDataLength: tg.initData?.length ?? 0,
+        initDataLength: tg.initData?.length ?? 0
       };
       document.getElementById("baseDump").textContent = safeJson(base);
 
-      document.getElementById("initDataDump").textContent = tg.initData || "(empty)";
-      document.getElementById("unsafeDump").textContent = safeJson(tg.initDataUnsafe);
+      document.body.classList.add("ready");
     }
 
-    dumpAll();
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", dump, { once: true });
+    } else {
+      dump();
+    }
   </script>
 </body>
 </html>
